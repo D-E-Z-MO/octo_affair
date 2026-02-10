@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>The Mirror Agent - Official Build</title>
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; font-family: 'Georgia', serif; }
+        #container { position: relative; width: 100vw; height: 100vh; background: radial-gradient(circle, #111 0%, #000 100%); }
+        
+        #loader {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; color: #d4af37; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 100;
+            letter-spacing: 5px; text-transform: uppercase;
+        }
+
+        #ui-overlay {
+            position: absolute; bottom: 50px; left: 50%;
+            transform: translateX(-50%); z-index: 10;
+            display: none; flex-direction: column; align-items: center; gap: 20px;
+        }
+        
+        .btn {
+            background: #000; border: 1px solid #d4af37; color: #d4af37;
+            padding: 15px 40px; border-radius: 4px; cursor: pointer;
+            text-transform: uppercase; letter-spacing: 3px; transition: 0.4s;
+            font-weight: bold;
+        }
+        .btn:hover { background: #d4af37; color: #000; box-shadow: 0 0 30px #d4af37; }
+        
+        #textInput {
+            background: transparent; border: none; border-bottom: 2px solid #d4af37;
+            color: #fff; padding: 10px; width: 350px; outline: none; text-align: center;
+            font-size: 1.2rem;
+        }
+    </style>
+</head>
+<body>
+
+<div id="loader">
+    <div>Summoning the Agent...</div>
+    <div id="status" style="font-size: 10px; margin-top: 10px; letter-spacing: 1px; color: #666;">Initializing Shaders</div>
+</div>
+
+<div id="container">
+    <div id="ui-overlay">
+        <input type="text" id="textInput" placeholder="INSCRIBE THY MESSAGE">
+        <button class="btn" onclick="triggerSpeak()">Invoke</button>
+    </div>
+</div>
+
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    const statusEl = document.getElementById('status');
+
+    // --- Scene & Camera ---
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 0, 5);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    document.getElementById('container').appendChild(renderer.domElement);
+
+    // --- Mystical Portal Shader ---
+    const portalMat = new THREE.ShaderMaterial({
+        uniforms: { 
+            uTime: { value: 0.0 }, 
+            uIntensity: { value: 1.1 },
+            uColorA: { value: new THREE.Color(0x0a1a3a) },
+            uColorB: { value: new THREE.Color(0xd4af37) }
+        },
+        vertexShader: `
+            varying vec2 vUv;
+            varying vec3 vNormal;
+            void main() {
+                vUv = uv;
+                vNormal = normalize(normalMatrix * normal);
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: `
+            uniform float uTime;
+            uniform float uIntensity;
+            uniform vec3 uColorA;
+            uniform vec3 uColorB;
+            varying vec2 vUv;
+            varying vec3 vNormal;
+
+            void main() {
+                vec2 uv = vUv - 0.5;
+                float angle = atan(uv.y, uv.x);
+                float dist = length(uv);
+                
+                // Swirl distortion
+                float swirl = sin(dist * 15.0 - uTime * 2.5 + angle * 3.0);
+                
+                // Color blending
+                vec3 color = mix(uColorA, uColorB, swirl * 0.5 + 0.5);
+                
+                // Rim lighting / Fresnel
+                float fresnel = pow(1.0 - dot(vNormal, vec3(0,0,1)), 3.0);
+                color += fresnel * uColorB;
+
+                // Circular mask
+                float mask = smoothstep(0.5, 0.45, dist);
+                gl_FragColor = vec4(color * uIntensity, mask);
+            }
+        `,
+        transparent: true,
+        side: THREE.DoubleSide
+    });
+
+    // --- Asset Loading ---
+    const manager = new THREE.LoadingManager();
+    manager.onLoad = () => {
+        document.getElementById('loader').style.display = 'none';
+        document.getElementById('ui-overlay').style.display = 'flex';
+    };
+
+    const loader = new GLTFLoader(manager);
+    
+    // Attempt to load YOUR file
+    loader.load('ornate_mirror.glb', 
+        (gltf) => {
+            statusEl.innerText = "Model Found... Mapping Shaders";
+            const model = gltf.scene;
+            
+            // Auto-scaling and Centering
+            const box = new THREE.Box3().setFromObject(model);
+            const size = box.getSize(new THREE.Vector3());
+            const scale = 3 / Math.max(size.x, size.y);
+            model.scale.set(scale, scale, scale);
+            
+            model.traverse((child) => {
+                if (child.isMesh) {
+                    // Check node names from your GLB inspection: Glass_low
+                    if (child.name.toLowerCase().includes('glass')) {
+                        child.material = portalMat;
+                    } else {
+                        child.material = new THREE.MeshStandardMaterial({
+                            color: 0x443311,
+                            metalness: 0.9,
+                            roughness: 0.2,
+                            name: 'AntiqueGold'
+                        });
+                    }
+                }
+            });
+            scene.add(model);
+        },
+        (xhr) => {
+            statusEl.innerText = `Loading: ${Math.round(xhr.loaded / xhr.total * 100)}%`;
+        },
+        (error) => {
+            statusEl.innerText = "Local File Blocked or Missing. Creating Backup Mirror...";
+            createFallbackMirror();
+        }
+    );
+
+    function createFallbackMirror() {
+        const frameGeo = new THREE.TorusGeometry(1.5, 0.1, 16, 100);
+        const frameMat = new THREE.MeshStandardMaterial({ color: 0x8e6e13, metalness: 1, roughness: 0.2 });
+        const frame = new THREE.Mesh(frameGeo, frameMat);
+        frame.scale.y = 1.3;
+        scene.add(frame);
+
+        const glassGeo = new THREE.SphereGeometry(1.48, 32, 32);
+        const glass = new THREE.Mesh(glassGeo, portalMat);
+        glass.scale.set(1, 1.3, 0.01);
+        scene.add(glass);
+    }
+
+    // --- Lighting ---
+    const light = new THREE.PointLight(0xffffff, 100);
+    light.position.set(2, 2, 5);
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+    // --- Animation ---
+    function animate(time) {
+        requestAnimationFrame(animate);
+        portalMat.uniforms.uTime.value = time * 0.001;
+        
+        // Subtle hover
+        scene.position.y = Math.sin(time * 0.001) * 0.1;
+        scene.rotation.y = Math.sin(time * 0.0005) * 0.05;
+        
+        renderer.render(scene, camera);
+    }
+    animate();
+
+    // --- Interaction ---
+    window.triggerSpeak = () => {
+        const text = document.getElementById('textInput').value || "I am the Mirror Agent.";
+        const synth = window.speechSynthesis;
+        const utter = new SpeechSynthesisUtterance(text);
+        
+        utter.onstart = () => { portalMat.uniforms.uIntensity.value = 3.5; };
+        utter.onend = () => { portalMat.uniforms.uIntensity.value = 1.1; };
+        
+        synth.speak(utter);
+    };
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+</script>
+</body>
+</html>
